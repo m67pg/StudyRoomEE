@@ -10,8 +10,13 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
 // builder.Build() ‚Ì‘O‚É’Ç‰Á
+// 1. İ’èî•ñ(Configuration)‚ğæ“¾
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? "Server=(localdb)\\mssqllocaldb;Database=StudyRoomDB;Trusted_Connection=True;MultipleActiveResultSets=true";
+
+// 2. æ“¾‚µ‚½Ú‘±•¶š—ñ‚ğg‚Á‚ÄDbContext‚ğİ’è
 builder.Services.AddDbContextFactory<AppDbContext>(options =>
-    options.UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=StudyRoomDB;Trusted_Connection=True;MultipleActiveResultSets=true"));
+    options.UseSqlServer(connectionString));
 
 var app = builder.Build();
 
