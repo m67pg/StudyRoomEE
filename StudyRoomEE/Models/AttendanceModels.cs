@@ -22,7 +22,15 @@ public class AttendanceLog
     {
         public static StudyTimeResult Calculate(IEnumerable<AttendanceLog> logs)
         {
-            var sortedLogs = logs.OrderBy(l => l.Timestamp).ToList();
+            // 1. 計算前に、すべてのログのタイムスタンプからミリ秒を切り捨てる
+            var sortedLogs = logs.Select(l => new AttendanceLog
+            {
+                Status = l.Status,
+                Timestamp = new DateTime(l.Timestamp.Year, l.Timestamp.Month, l.Timestamp.Day,
+                                         l.Timestamp.Hour, l.Timestamp.Minute, l.Timestamp.Second)
+            })
+            .OrderBy(l => l.Timestamp).ToList();
+
             TimeSpan away = TimeSpan.Zero;
             TimeSpan net = TimeSpan.Zero;
             DateTime? lastInTime = null;

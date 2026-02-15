@@ -1,6 +1,27 @@
-﻿<Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)">
-    <Found Context="routeData">
-        <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
-        <FocusOnNavigate RouteData="routeData" Selector="h1" />
-    </Found>
-</Router>
+﻿@using Microsoft.AspNetCore.Components.Authorization
+
+<CascadingAuthenticationState>
+    <Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)">
+        <Found Context="routeData">
+            <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
+
+                @* ログインしていないユーザーに表示する内容 *@
+                <NotAuthorized>
+                    <div style="padding: 2rem; text-align: center;">
+                        <h3>ログインが必要です</h3>
+                        <a href="Account/Login" class="btn btn-primary">ログインページへ</a>
+                    </div>
+                </NotAuthorized>
+
+                @* 認証処理中の表示（一瞬表示される場合があります） *@
+                <Authorizing>
+                    <div style="padding: 2rem; text-align: center;">
+                        <p>認証を確認しています...</p>
+                    </div>
+                </Authorizing>
+
+            </AuthorizeRouteView>
+            <FocusOnNavigate RouteData="routeData" Selector="h1" />
+        </Found>
+    </Router>
+</CascadingAuthenticationState>

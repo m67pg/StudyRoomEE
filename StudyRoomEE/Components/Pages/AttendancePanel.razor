@@ -1,0 +1,242 @@
+﻿@using ClosedXML.Excel
+@using StudyRoomEE.Models
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Web
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject IJSRuntime JS
+@inject IJSRuntime JSRuntime
+@rendermode InteractiveServer
+
+@if (StudentId == 0)
+{
+    @* --- 管理者用の表示 --- *@
+    <div class="status-card admin-card">
+        <h3>管理者モード</h3>
+        <p>全生徒の利用状況の管理が可能です</p>
+
+        @* 生徒選択ドロップダウンの追加 *@
+        <div class="mt-3 text-start">
+            <label class="form-label" style="font-size: 0.9rem; font-weight: bold;">出力対象の生徒を選択:</label>
+            <select class="form-select" @bind="selectedStudentId">
+                <option value="0">全員（全生徒の合計）</option>
+                @foreach (var student in students)
+                {
+                    <option value="@student.StudentId">[@student.StudentId] @student.UserName さん</option>
+                }
+            </select>
+        </div>
+    </div>
+
+    <div class="button-grid">
+        <button type="button" class="btn btn-excel" @onclick="ExportToExcel">
+            <i class="bi bi-file-earmark-excel"></i>
+            @(selectedStudentId == 0 ? "1ヶ月の全履歴をExcel出力" : "選択した生徒の履歴を出力")
+        </button>
+    </div>
+}
+else
+{
+    @* --- 生徒用の表示（変更なし） --- *@
+    <div class="status-card">
+        <h3>現在の状態: <span class="status-label">@currentStatus</span></h3>
+        <p>今日の純自習時間: <strong>@todayResult.NetStudyTime.ToString(@"hh\:mm\:ss")</strong></p>
+    </div>
+
+    <div class="button-grid">
+        @if (currentStatus == "外" || currentStatus == "退室済み")
+        {
+            <button type="button" class="btn btn-entry" @onclick='() => Record("入室")'>入室</button>
+        }
+        @if (currentStatus == "入室中")
+        {
+            <button type="button" class="btn btn-away" @onclick='() => Record("一時退出")'>一時退出</button>
+            <button type="button" class="btn btn-out" @onclick='() => Record("退室")'>退室</button>
+        }
+        @if (currentStatus == "一時退出中")
+        {
+            <button type="button" class="btn btn-return" @onclick='() => Record("一時退出戻り")'>戻り</button>
+        }
+    </div>
+}
+
+<style>
+    .status-card {
+        background: #f8f9fa;
+        padding: 20px;
+        border-radius: 15px;
+        text-align: center;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    }
+
+    .admin-card {
+        border-left: 2px solid rgba(0,0,0,0.1);
+    }
+
+    .button-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+    }
+
+    .btn {
+        border: none;
+        padding: 25px;
+        border-radius: 12px;
+        font-size: 1.5rem;
+        font-weight: bold;
+        color: white;
+        cursor: pointer;
+    }
+
+    .btn-entry {
+        background-color: #28a745;
+    }
+
+    .btn-away {
+        background-color: #ffc107;
+        color: #333;
+    }
+
+    .btn-return {
+        background-color: #17a2b8;
+    }
+
+    .btn-out {
+        background-color: #dc3545;
+    }
+
+    .btn-excel {
+        background-color: #6c757d;
+        font-size: 1rem;
+        padding: 15px;
+        width: 100%;
+        margin-top: 20px;
+    }
+
+    .form-select {
+        padding: 10px;
+        border-radius: 8px;
+        border: 1px solid #ced4da;
+        width: 100%;
+    }
+</style>
+
+@code {
+    [Parameter] public int StudentId { get; set; }
+    [Parameter] public AuthenticationStateProvider AuthStateProvider { get; set; } = default!;
+
+    private string currentStatus = "外";
+    private List<AttendanceLog> todayLogs = new();
+    private StudyTimeResult todayResult = new();
+
+    // 管理者用変数
+    private List<ApplicationUser> students = new();
+    private int selectedStudentId = 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadTodayStatus();
+
+        // 管理者の場合、ドロップダウン用の生徒リストを取得
+        if (StudentId == 0)
+        {
+            using var context = DbFactory.CreateDbContext();
+            students = await context.Users
+                .Where(u => u.StudentId > 0)
+                .OrderBy(u => u.StudentId)
+                .ToListAsync();
+        }
+    }
+
+    private async Task LoadTodayStatus()
+    {
+        using var context = DbFactory.CreateDbContext();
+        var today = DateTime.Today;
+
+        todayLogs = await context.Attendances
+            .Where(l => l.Timestamp >= today && l.StudentId == StudentId)
+            .OrderBy(l => l.Timestamp)
+            .ToListAsync();
+
+        if (todayLogs.Any())
+        {
+            var lastLog = todayLogs.Last();
+            currentStatus = lastLog.Status switch
+            {
+                "入室" or "一時退出戻り" => "入室中",
+                "一時退出" => "一時退出中",
+                "退室" => "退室済み",
+                _ => "外"
+            };
+            todayResult = StudyCalculator.Calculate(todayLogs);
+        }
+    }
+
+    private async Task Record(string status)
+    {
+        using var context = DbFactory.CreateDbContext();
+        var newLog = new AttendanceLog { Timestamp = DateTime.Now, Status = status, StudentId = StudentId };
+        context.Attendances.Add(newLog);
+        await context.SaveChangesAsync();
+        await LoadTodayStatus();
+        StateHasChanged();
+    }
+
+    private async Task ExportToExcel()
+    {
+        using var context = DbFactory.CreateDbContext();
+        var firstDayOfMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+        var lastDayOfMonth = firstDayOfMonth.AddMonths(1).AddDays(-1).AddHours(23).AddMinutes(59);
+
+        // クエリの作成
+        var query = context.Attendances
+            .Where(l => l.Timestamp >= firstDayOfMonth && l.Timestamp <= lastDayOfMonth);
+
+        // 生徒が選択されている場合はその生徒だけでフィルタリング
+        if (selectedStudentId > 0)
+        {
+            query = query.Where(l => l.StudentId == selectedStudentId);
+        }
+
+        var logs = await query.OrderByDescending(l => l.Timestamp).ToListAsync();
+
+        // Excelを作成
+        using var workbook = new XLWorkbook();
+        var fileNamePart = selectedStudentId == 0 ? "全生徒" : $"生徒ID_{selectedStudentId}";
+        var worksheet = workbook.Worksheets.Add($"{DateTime.Today:MM}月分_{fileNamePart}");
+
+        worksheet.Cell(1, 1).Value = "日付";
+        worksheet.Cell(1, 2).Value = "一時退出合計";
+        worksheet.Cell(1, 3).Value = "純自習時間";
+
+        int currentRow = 2;
+        var groupedLogs = logs.GroupBy(l => l.Timestamp.Date);
+        foreach (var day in groupedLogs)
+        {
+            var result = StudyCalculator.Calculate(day);
+
+            // ミリ秒を切り捨てたTimeSpanを作成
+            var totalAway = new TimeSpan(result.TotalAwayTime.Hours, result.TotalAwayTime.Minutes, result.TotalAwayTime.Seconds);
+            var netStudy = new TimeSpan(result.NetStudyTime.Hours, result.NetStudyTime.Minutes, result.NetStudyTime.Seconds);
+
+            worksheet.Cell(currentRow, 1).Value = day.Key.ToShortDateString();
+
+            // 文字列として書き込む（hh:mm:ss 形式に固定）
+            worksheet.Cell(currentRow, 2).Value = totalAway.ToString(@"hh\:mm\:ss");
+            worksheet.Cell(currentRow, 3).Value = netStudy.ToString(@"hh\:mm\:ss");
+            
+            currentRow++;
+        }
+
+        worksheet.Columns().AdjustToContents();
+
+        using var stream = new MemoryStream();
+        workbook.SaveAs(stream);
+        var fileBytes = stream.ToArray();
+
+        using var streamRef = new DotNetStreamReference(new MemoryStream(fileBytes));
+        await JS.InvokeVoidAsync("downloadFileFromStream", $"StudyLog_{fileNamePart}_{DateTime.Today:yyyyMM}.xlsx", streamRef);
+    }
+}

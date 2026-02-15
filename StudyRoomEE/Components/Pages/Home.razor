@@ -1,166 +1,38 @@
 ﻿@page "/"
-@rendermode InteractiveServer
-@using Microsoft.JSInterop
-@using ClosedXML.Excel
-@using Microsoft.EntityFrameworkCore
-@using StudyRoomEE.Models
-@inject IDbContextFactory<AppDbContext> DbFactory
-@inject IJSRuntime JS
+@attribute [Authorize]
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@inject AuthenticationStateProvider AuthStateProvider
 
 <div class="mobile-container">
-    <div class="status-card">
-        <h3>現在の状態: <span class="status-label">@currentStatus</span></h3>
-        <p>今日の純自習時間: <strong>@todayResult.NetStudyTime.ToString(@"hh\:mm\:ss")</strong></p>
-    </div>
+    <AuthorizeView>
+        <Authorized>
+            @* --- 共通：ログアウトとメッセージ --- *@
+            <div class="d-flex align-items-center justify-content-end my-1">
+                <form action="logout" method="post" class="m-0 d-inline">
+                    <AntiforgeryToken />
+                    <button type="submit" class="btn btn-link p-0 text-decoration-none border-0" title="ログアウト"
+                            style="color: #d63638; line-height: 1; background: none;">
+                        <i class="bi bi-box-arrow-right fs-5 me-1"></i>
+                    </button>
+                    <span class="ms-2" style="font-size: 0.85rem; color: #333;">
+                        こんにちは、<strong>@context.User.Identity?.Name</strong> さん
+                    </span>
+                </form>
+            </div>
 
-    <div class="button-grid">
-        @* 「外」または「退室済み」のときに入室ボタンを出す *@
-        @if (currentStatus == "外" || currentStatus == "退室済み")
-        {
-            <button class="btn btn-entry" @onclick='() => Record("入室")'>入室</button>
-        }
+            @* --- 権限による出し分け --- *@
+            @{
+                // ClaimからStudentIdを取得（数値変換）
+                var sIdClaim = context.User.FindFirst("StudentId")?.Value;
+                int.TryParse(sIdClaim, out int sId);
+            }
 
-        @if (currentStatus == "入室中")
-        {
-            <button class="btn btn-away" @onclick='() => Record("一時退出")'>一時退出</button>
-            <button class="btn btn-out" @onclick='() => Record("退室")'>退室</button>
-        }
-
-        @if (currentStatus == "一時退出中")
-        {
-            <button class="btn btn-return" @onclick='() => Record("一時退出戻り")'>戻り</button>
-        }
-    </div>
-
-    <hr />
-    <button class="btn btn-excel" @onclick="ExportToExcel">1ヶ月の履歴をExcel出力</button>
+            <AttendancePanel StudentId="sId" AuthStateProvider="AuthStateProvider" />
+        </Authorized>
+    </AuthorizeView>
 </div>
 
 <style>
     .mobile-container { max-width: 500px; margin: 0 auto; padding: 20px; font-family: sans-serif; }
-    .status-card { background: #f8f9fa; padding: 20px; border-radius: 15px; text-align: center; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-    .button-grid { display: flex; flex-direction: column; gap: 15px; }
-    .btn { border: none; padding: 25px; border-radius: 12px; font-size: 1.5rem; font-weight: bold; color: white; cursor: pointer; }
-    .btn-entry { background-color: #28a745; }
-    .btn-away { background-color: #ffc107; color: #333; }
-    .btn-return { background-color: #17a2b8; }
-    .btn-out { background-color: #dc3545; }
-    .btn-excel { background-color: #6c757d; font-size: 1rem; padding: 15px; width: 100%; margin-top: 20px; }
 </style>
-
-@code {
-    private string currentStatus = "外";
-    private List<AttendanceLog> todayLogs = new();
-    private StudyTimeResult todayResult = new();
-
-    // 画面が初期化される時に実行されるメソッド
-    protected override async Task OnInitializedAsync()
-    {
-        await LoadTodayStatus();
-    }
-
-    private async Task LoadTodayStatus()
-    {
-        using var context = DbFactory.CreateDbContext();
-        var today = DateTime.Today;
-
-        // 1. 今日のログをすべて取得
-        todayLogs = await context.Attendances
-            .Where(l => l.Timestamp >= today && l.StudentId == 1)
-            .OrderBy(l => l.Timestamp)
-            .ToListAsync();
-
-        // 2. データがある場合は、最後のログから現在の状態を判定
-        if (todayLogs.Any())
-        {
-            var lastLog = todayLogs.Last();
-            
-            // ステータス文字列から表示用のステータスに変換
-            currentStatus = lastLog.Status switch
-            {
-                "入室" or "一時退出戻り" => "入室中",
-                "一時退出" => "一時退出中",
-                "退室" => "退室済み",
-                _ => "外"
-            };
-
-            // 3. 自習時間を計算して反映
-            todayResult = StudyCalculator.Calculate(todayLogs);
-        }
-        else
-        {
-            // データがない場合はデフォルト値
-            currentStatus = "外";
-            todayResult = new StudyTimeResult();
-        }
-    }
-
-    // Recordメソッドの中でも最後に LoadTodayStatus() を呼ぶようにするとコードがスッキリします
-    private async Task Record(string status)
-    {
-        using var context = DbFactory.CreateDbContext();
-        try 
-        {
-            var newLog = new AttendanceLog 
-            { 
-                Timestamp = DateTime.Now, 
-                Status = status,
-                StudentId = 1 
-            };
-
-            context.Attendances.Add(newLog);
-            await context.SaveChangesAsync();
-
-            // 最新状態を再読み込み
-            await LoadTodayStatus();
-            
-            StateHasChanged();
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"DB保存エラー: {ex.Message}");
-        }
-    }
-
-    private async Task ExportToExcel()
-    {
-        using var context = DbFactory.CreateDbContext();
-        var firstDayOfMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
-        var lastDayOfMonth = firstDayOfMonth.AddMonths(1).AddDays(-1);
-
-        // 1. 指定期間のログを取得
-        var logs = await context.Attendances
-            .Where(l => l.Timestamp >= firstDayOfMonth && l.Timestamp <= lastDayOfMonth.AddHours(23).AddMinutes(59))
-            .OrderBy(l => l.Timestamp)
-            .ToListAsync();
-
-        // 2. Excelを作成
-        using var workbook = new XLWorkbook();
-        var worksheet = workbook.Worksheets.Add("1月分自習記録");
-        worksheet.Cell(1, 1).Value = "日付";
-        worksheet.Cell(1, 2).Value = "一時退出合計";
-        worksheet.Cell(1, 3).Value = "純自習時間";
-
-        // 日ごとに集計して行を追加
-        int currentRow = 2;
-        var groupedLogs = logs.GroupBy(l => l.Timestamp.Date);
-        foreach (var day in groupedLogs)
-        {
-            var result = StudyCalculator.Calculate(day);
-            worksheet.Cell(currentRow, 1).Value = day.Key.ToShortDateString();
-            worksheet.Cell(currentRow, 2).Value = result.TotalAwayTime.ToString(@"hh\:mm\:ss");
-            worksheet.Cell(currentRow, 3).Value = result.NetStudyTime.ToString(@"hh\:mm\:ss");
-            currentRow++;
-        }
-
-        worksheet.Columns().AdjustToContents(); // 列幅の自動調整
-
-        // 3. ブラウザへ送信
-        using var stream = new MemoryStream();
-        workbook.SaveAs(stream);
-        var fileBytes = stream.ToArray();
-
-        using var streamRef = new DotNetStreamReference(new MemoryStream(fileBytes));
-        await JS.InvokeVoidAsync("downloadFileFromStream", $"StudyLog_{DateTime.Today:yyyyMM}.xlsx", streamRef);
-    }
-}

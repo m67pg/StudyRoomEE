@@ -1,0 +1,135 @@
+﻿@page "/Account/Login"
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.AspNetCore.Components.Forms
+@using StudyRoomEE.Models
+@inject SignInManager<ApplicationUser> SignInManager
+@inject NavigationManager NavigationManager
+
+<PageTitle>ログイン ‹ 自習室入退室システム — WordPress風</PageTitle>
+
+<style>
+    /* 1. ページ全体の余白をリセットし、画面全体を支配する */
+    body {
+        background-color: #f0f0f1 !important;
+        margin: 0;
+        padding: 0;
+    }
+
+    /* 2. Blazorの標準レイアウトがつける余白を、ログイン画面の時だけ無効化する */
+    main {
+        padding: 0 !important;
+        max-width: none !important;
+    }
+
+    /* 3. ログイン専用のコンテナ（上下左右中央） */
+    .wp-login-wrapper {
+        display: flex;
+        align-items: flex-start; /* 縦方向は「上詰め」 */
+        justify-content: center; /* 横方向は中央 */
+        min-height: 100vh; /* 画面の高さ100%使う */
+        width: 100%;
+        position: absolute; /* 他のレイアウトの影響を受けないように配置 */
+        top: 0;
+        left: 0;
+        z-index: 9999;
+        background-color: #f0f0f1;
+        padding-top: 100px;
+    }
+
+    /* 4. WordPressのカード幅 */
+    .wp-login-container {
+        width: 320px;
+        margin: 0 auto;
+    }
+
+    /* 以下、前回のカードスタイルを継続 */
+    .login-card {
+        background: #fff;
+        border: 1px solid #c3c4c7;
+        box-shadow: 0 1px 3px rgba(0,0,0,.04);
+        padding: 26px 24px 34px;
+    }
+
+    .btn-wp {
+        background: #2271b1;
+        border-color: #2271b1;
+        color: #fff;
+        padding: 4px 12px;
+        border-radius: 3px;
+        border: 1px solid;
+    }
+</style>
+
+@* 全体を包むラッパーを配置 *@
+<div class="wp-login-wrapper">
+    <div class="wp-login-container">
+
+        <div class="text-center mb-4">
+            <a href="/" style="text-decoration: none; color: #3c434a; font-size: 24px;">
+                <b>自習室入退室システム</b>
+            </a>
+        </div>
+        <br />
+
+        @if (!string.IsNullOrEmpty(ErrorMessage))
+        {
+            <div class="alert alert-danger mb-3" style="border-left: 4px solid #d63638; background: #fff; color: #3c434a; font-size: 14px; border-radius: 0;">
+                @((MarkupString)ErrorMessage)
+            </div>
+        }
+
+        <div class="login-card shadow-sm">
+            <EditForm Model="Input" OnValidSubmit="LoginUser" FormName="LoginForm">
+                <DataAnnotationsValidator />
+
+                <div class="mb-3">
+                    <label class="form-label">ユーザー名またはメールアドレス</label>
+                    <InputText @bind-Value="Input.Email" class="form-control w-100" />
+                </div>
+
+                <div class="mb-4">
+                    <label class="form-label">パスワード</label><br />
+                    <InputText @bind-Value="Input.Password" type="password" class="form-control w-100" />
+                </div>
+                <br />
+
+                <div class="d-flex justify-content-between align-items-center">
+                    <button type="submit" class="btn-wp">ログイン</button>
+                </div>
+            </EditForm>
+        </div>
+
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromForm]
+    private LoginModel Input { get; set; } = new();
+
+    private string? ErrorMessage { get; set; }
+
+    public async Task LoginUser()
+    {
+        ErrorMessage = null;
+        var result = await SignInManager.PasswordSignInAsync(Input.Email, Input.Password, isPersistent: true, lockoutOnFailure: false);
+
+        if (result.Succeeded)
+        {
+            NavigationManager.NavigateTo("/", forceLoad: true);
+        }
+        else
+        {
+            ErrorMessage = "<strong>エラー</strong>: ユーザー名またはパスワードが正しくありません。";
+        }
+    }
+
+    public class LoginModel
+    {
+        [Required(ErrorMessage = "入力してください")]
+        public string Email { get; set; } = "";
+
+        [Required(ErrorMessage = "入力してください")]
+        public string Password { get; set; } = "";
+    }
+}
