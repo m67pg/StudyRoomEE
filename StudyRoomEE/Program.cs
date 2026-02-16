@@ -20,7 +20,15 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
 
 // 2. 取得した接続文字列を使ってDbContextを設定
 builder.Services.AddDbContextFactory<AppDbContext>(options =>
-    options.UseSqlServer(connectionString));
+    options.UseSqlServer(connectionString,
+        sqlServerOptionsAction: sqlOptions =>
+        {
+            // 一過性のエラーが発生した際に自動で再試行する
+            sqlOptions.EnableRetryOnFailure(
+                maxRetryCount: 5,           // 最大5回リトライ
+                maxRetryDelay: TimeSpan.FromSeconds(10), // リトライ間の最大待ち時間
+                errorNumbersToAdd: null);   // 特定のエラー番号を追加したい場合はここに
+        }));
 
 // 認証・認可のサービス登録
 builder.Services.AddAuthentication(options =>
